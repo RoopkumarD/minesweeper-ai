@@ -7,6 +7,9 @@ def factorial(n):
 
 
 def nCr(n, r):
+    if r < 0 or r > n:
+        raise Exception("r < 0 or r > n")
+
     num = factorial(n)
     deno = factorial(n - r) * factorial(r)
 

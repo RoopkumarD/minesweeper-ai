@@ -124,21 +124,18 @@ class MinesweeperAI:
         new_knowledge = new_knowledge - set(cell)
         count = count - len(self.mines.intersection(all_cells_surrounding))
 
-        new_prob_deno = nCr(len(new_knowledge), count)
-        new_prob_num = nCr(len(new_knowledge) - 1, count)
-        new_prob = new_prob_num / new_prob_deno
+        if count == 0:
+            probability_value = 0
+        else:
+            length = len(new_knowledge)
+            probability_value = nCr(length, count - 1) / nCr(length, count)
+
         for c in new_knowledge:
-            if count == 0:
-                self.knowledge[c] = 0
+            if c in self.knowledge:
+                if self.knowledge[c] != 0 or self.knowledge[c] != 1:
+                    self.knowledge[c] = probability_value
             else:
-                if new_prob_deno == 1:
-                    self.knowledge[c] = 1
-                else:
-                    if c in self.knowledge:
-                        if self.knowledge[c] > new_prob:
-                            self.knowledge[c] = new_prob
-                    else:
-                        self.knowledge[c] = new_prob
+                self.knowledge[c] = probability_value
 
         copied_dict = copy.deepcopy(self.knowledge)
         for c in copied_dict:
@@ -146,17 +143,23 @@ class MinesweeperAI:
                 self.mines.add(c)
                 del self.knowledge[c]
 
+        print(self.knowledge)
         return
 
     def make_safe_move(self):
         # make a move which has probabilities <= 0.5
         move = None
-        print(self.knowledge)
+        lowest_prob = 1
         for key in self.knowledge:
-            if self.knowledge[key] < 0.5:
+            if self.knowledge[key] < lowest_prob:
                 move = key
+                lowest_prob = self.knowledge[key]
+
+        if lowest_prob >= 0.5:
+            move = None
 
         if move != None:
+            print("Made safe move", move)
             self.moves_made.add(move)
             del self.knowledge[move]
 
@@ -169,4 +172,6 @@ class MinesweeperAI:
 
         random_move = random.randint(0, len(available_moves) - 1)
 
-        return list(available_moves)[random_move]
+        move = list(available_moves)[random_move]
+        print("Made random move", move)
+        return move
