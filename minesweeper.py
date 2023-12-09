@@ -1,4 +1,7 @@
+import copy
 import random
+
+from utils import nCr
 
 
 class Minesweeper:
@@ -91,11 +94,15 @@ class MinesweeperAI:
         self.height = height
         self.width = width
 
+        self.moves = set()
+        for i in range(8):
+            for j in range(8):
+                self.moves.add((i, j))
+
         # Keep track of which cells have been clicked on
         self.moves_made = set()
 
-        # mines
-        # if the probability of block is 1, then add it to this
+        # mines, if the probability of block is 1, then add it to this
         self.mines = set()
 
         # probabilities of each coordinate
@@ -103,13 +110,63 @@ class MinesweeperAI:
 
     def add_knowledge(self, cell, count):
         # update probabilities after making a move
-        pass
+        self.moves_made.add(cell)
+
+        new_knowledge = set()
+        all_cells_surrounding = set()
+
+        for i in range(cell[0] - 1, cell[0] + 2):
+            for j in range(cell[1] - 1, cell[1] + 2):
+                if 0 <= i < self.height and 0 <= j < self.width:
+                    all_cells_surrounding.add((i, j))
+
+        new_knowledge = all_cells_surrounding - self.moves_made.union(self.mines)
+        new_knowledge = new_knowledge - set(cell)
+        count = count - len(self.mines.intersection(all_cells_surrounding))
+
+        new_prob_deno = nCr(len(new_knowledge), count)
+        new_prob_num = nCr(len(new_knowledge) - 1, count)
+        new_prob = new_prob_num / new_prob_deno
+        for c in new_knowledge:
+            if count == 0:
+                self.knowledge[c] = 0
+            else:
+                if new_prob_deno == 1:
+                    self.knowledge[c] = 1
+                else:
+                    if c in self.knowledge:
+                        if self.knowledge[c] > new_prob:
+                            self.knowledge[c] = new_prob
+                    else:
+                        self.knowledge[c] = new_prob
+
+        copied_dict = copy.deepcopy(self.knowledge)
+        for c in copied_dict:
+            if self.knowledge[c] == 1:
+                self.mines.add(c)
+                del self.knowledge[c]
+
+        return
 
     def make_safe_move(self):
         # make a move which has probabilities <= 0.5
-        pass
+        move = None
+        print(self.knowledge)
+        for key in self.knowledge:
+            if self.knowledge[key] < 0.5:
+                move = key
+
+        if move != None:
+            self.moves_made.add(move)
+            del self.knowledge[move]
+
+        return move
 
     def make_random_move(self):
         # if there are not any moves with less than or equal to 0.5, then make a random move
         # also remove mines from available moves
-        pass
+        available_moves = self.moves - self.moves_made.union(self.mines)
+
+        random_move = random.randint(0, len(available_moves) - 1)
+
+        return list(available_moves)[random_move]
