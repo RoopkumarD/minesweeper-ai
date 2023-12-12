@@ -1,7 +1,8 @@
-import copy
 import random
+from copy import deepcopy
+from typing import Dict, List
 
-from utils import nCr
+from utils import bucket_combinations, combine_buckets, new_bucket_coordinate
 
 
 class Minesweeper:
@@ -84,6 +85,39 @@ class Minesweeper:
         return self.mines_found == self.mines
 
 
+class Knowledge:
+    def __init__(self, dependency: set[tuple[int, int]], bombs: int) -> None:
+        self.dependency = dependency
+        self.bomb_count = bombs
+
+    def __repr__(self) -> str:
+        return f"{self.dependency} = {self.bomb_count}"
+
+    def remove_bomb(self, bomb: tuple[int, int]):
+        if bomb not in self.dependency:
+            return
+
+        self.dependency.remove(bomb)
+        self.bomb_count -= 1
+
+    def evaluate(self, model: Dict) -> bool:
+        count = 0
+        for c in self.dependency:
+            count += model[c]
+
+        return count == self.bomb_count
+
+    def remove_safe(self, safe: tuple[int, int]):
+        if safe not in self.dependency:
+            return
+
+        self.dependency.remove(safe)
+
+    def add_nodes(self, node: tuple[int, int]):
+        # only used for bucket_coordinate
+        self.dependency.add(node)
+
+
 class MinesweeperAI:
     """
     Minesweeper game player
@@ -102,15 +136,48 @@ class MinesweeperAI:
         # Keep track of which cells have been clicked on
         self.moves_made = set()
 
-        # mines, if the probability of block is 1, then add it to this
+        # safe so on future we can remove elements
+        self.safe = set()
         self.mines = set()
 
         # probabilities of each coordinate
         self.knowledge = dict()
 
+        # knowledge helper
+        # this is for finding clusters so that in individual cluster
+        # we can perform probability
+        self.bucket: List[List[Knowledge]] = list()
+        # List[Knowledge]
+        self.bucket_coordinate: List[Knowledge] = list()
+
+    def mark_safe_move(self, safe: tuple[int, int]):
+        i = None
+        for val in self.bucket_coordinate:
+            if safe in val.dependency:
+                i = val.bomb_count
+
+        if i != None:
+            for k in self.bucket[i]:
+                k.remove_safe(safe)
+
+        self.safe.add(safe)
+
+    def mark_bomb_move(self, bomb: tuple[int, int]):
+        i = None
+        for val in self.bucket_coordinate:
+            if bomb in val.dependency:
+                i = val.bomb_count
+
+        if i != None:
+            for k in self.bucket[i]:
+                k.remove_bomb(bomb)
+
+        self.mines.add(bomb)
+
     def add_knowledge(self, cell, count):
         # update probabilities after making a move
         self.moves_made.add(cell)
+        self.mark_safe_move(cell)
 
         new_knowledge = set()
         all_cells_surrounding = set()
@@ -122,28 +189,65 @@ class MinesweeperAI:
 
         new_knowledge = all_cells_surrounding - self.moves_made.union(self.mines)
         new_knowledge = new_knowledge - set(cell)
+        new_knowledge = new_knowledge - self.safe
         count = count - len(self.mines.intersection(all_cells_surrounding))
 
-        if count == 0:
-            probability_value = 0
+        n = None
+        bcn = None
+        for k in new_knowledge:
+            for bci in range(len(self.bucket_coordinate)):
+                if k in self.bucket_coordinate[bci].dependency:
+                    n = self.bucket_coordinate[bci].bomb_count
+                    bcn = bci
+
+        if n != None and bcn != None:
+            self.bucket[n].append(Knowledge(new_knowledge, count))
+            for nk in new_knowledge:
+                self.bucket_coordinate[bcn].add_nodes(nk)
         else:
-            length = len(new_knowledge)
-            probability_value = nCr(length, count - 1) / nCr(length, count)
+            self.bucket.append([Knowledge(new_knowledge, count)])
+            self.bucket_coordinate.append(
+                (Knowledge(new_knowledge, len(self.bucket) - 1))
+            )
 
-        for c in new_knowledge:
-            if c in self.knowledge:
-                if self.knowledge[c] != 0 or self.knowledge[c] != 1:
-                    self.knowledge[c] = probability_value
-            else:
-                self.knowledge[c] = probability_value
+        # now see if there are common and combine buckets
+        self.bucket = combine_buckets(self.bucket)
+        self.bucket_coordinate = new_bucket_coordinate(self.bucket)
 
-        copied_dict = copy.deepcopy(self.knowledge)
-        for c in copied_dict:
-            if self.knowledge[c] == 1:
-                self.mines.add(c)
-                del self.knowledge[c]
+        for bt in self.bucket:
+            index = []
+            for k in range(len(bt)):
+                if len(bt[k].dependency) == 0:
+                    index.append(k)
+
+            for i in index:
+                bt.pop(i)
+
+        # then apply probabilities to each bucket and get result
+        for bt in self.bucket:
+            d = set([m for k in bt for m in k.dependency])
+            model = dict()
+            count = dict()
+            total = {"total": 0}
+
+            for m in d:
+                model[m] = 0
+                count[m] = 0
+
+            bucket_combinations(bt, d, model, count, total)
+
+            for i in count:
+                self.knowledge[i] = count[i] / total["total"]
+
+        # then remove all the mines with prob = 1
+        temp_knowledge = deepcopy(self.knowledge)
+        for k in temp_knowledge:
+            if temp_knowledge[k] == 1:
+                self.mark_bomb_move(k)
+                del self.knowledge[k]
 
         print(self.knowledge)
+        print(self.mines)
         return
 
     def make_safe_move(self):
@@ -166,12 +270,16 @@ class MinesweeperAI:
         return move
 
     def make_random_move(self):
-        # if there are not any moves with less than or equal to 0.5, then make a random move
-        # also remove mines from available moves
-        available_moves = self.moves - self.moves_made.union(self.mines)
+        # make a random move where there are 0.5 and other unknown blocks involved
+        available_moves = self.moves - self.moves_made
+        available_moves = available_moves - self.mines
 
+        probmore0dot5 = set()
+        for cell in self.knowledge:
+            if self.knowledge[cell] > 0.5:
+                probmore0dot5.add(cell)
+
+        available_moves = available_moves - probmore0dot5
         random_move = random.randint(0, len(available_moves) - 1)
 
-        move = list(available_moves)[random_move]
-        print("Made random move", move)
-        return move
+        return list(available_moves)[random_move]
