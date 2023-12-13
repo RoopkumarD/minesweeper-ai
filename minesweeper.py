@@ -1,8 +1,9 @@
 import random
 from copy import deepcopy
-from typing import Dict, List
+from typing import List, Set, Tuple
 
-from utils import bucket_combinations, combine_buckets, new_bucket_coordinate
+from utils import (Knowledge, bucket_combinations, combine_buckets,
+                   new_bucket_coordinate)
 
 
 class Minesweeper:
@@ -85,39 +86,6 @@ class Minesweeper:
         return self.mines_found == self.mines
 
 
-class Knowledge:
-    def __init__(self, dependency: set[tuple[int, int]], bombs: int) -> None:
-        self.dependency = dependency
-        self.bomb_count = bombs
-
-    def __repr__(self) -> str:
-        return f"{self.dependency} = {self.bomb_count}"
-
-    def remove_bomb(self, bomb: tuple[int, int]):
-        if bomb not in self.dependency:
-            return
-
-        self.dependency.remove(bomb)
-        self.bomb_count -= 1
-
-    def evaluate(self, model: Dict) -> bool:
-        count = 0
-        for c in self.dependency:
-            count += model[c]
-
-        return count == self.bomb_count
-
-    def remove_safe(self, safe: tuple[int, int]):
-        if safe not in self.dependency:
-            return
-
-        self.dependency.remove(safe)
-
-    def add_nodes(self, node: tuple[int, int]):
-        # only used for bucket_coordinate
-        self.dependency.add(node)
-
-
 class MinesweeperAI:
     """
     Minesweeper game player
@@ -137,8 +105,8 @@ class MinesweeperAI:
         self.moves_made = set()
 
         # safe so on future we can remove elements
-        self.safe = set()
-        self.mines = set()
+        self.safe: Set[Tuple[int, int]] = set()
+        self.mines: Set[Tuple[int, int]] = set()
 
         # probabilities of each coordinate
         self.knowledge = dict()
@@ -177,7 +145,6 @@ class MinesweeperAI:
     def add_knowledge(self, cell, count):
         # update probabilities after making a move
         self.moves_made.add(cell)
-        self.mark_safe_move(cell)
 
         new_knowledge = set()
         all_cells_surrounding = set()
@@ -214,14 +181,14 @@ class MinesweeperAI:
         self.bucket = combine_buckets(self.bucket)
         self.bucket_coordinate = new_bucket_coordinate(self.bucket)
 
-        for bt in self.bucket:
-            index = []
-            for k in range(len(bt)):
-                if len(bt[k].dependency) == 0:
-                    index.append(k)
+        length_bucket = len(self.bucket)
+        for bt in range(length_bucket):
+            new_b = []
+            for k in self.bucket[bt]:
+                if len(k.dependency) != 0:
+                    new_b.append(k)
 
-            for i in index:
-                bt.pop(i)
+            self.bucket[bt] = new_b
 
         # then apply probabilities to each bucket and get result
         for bt in self.bucket:
@@ -245,6 +212,9 @@ class MinesweeperAI:
             if temp_knowledge[k] == 1:
                 self.mark_bomb_move(k)
                 del self.knowledge[k]
+            elif temp_knowledge[k] == 0:
+                self.mark_safe_move(k)
+                del self.knowledge[k]
 
         print(self.knowledge)
         print(self.mines)
@@ -252,6 +222,11 @@ class MinesweeperAI:
 
     def make_safe_move(self):
         # make a move which has probabilities <= 0.5
+        if len(self.safe) != 0:
+            move = self.safe.pop()
+            print("Made safe move", move)
+            return move
+
         move = None
         lowest_prob = 1
         for key in self.knowledge:
@@ -259,7 +234,7 @@ class MinesweeperAI:
                 move = key
                 lowest_prob = self.knowledge[key]
 
-        if lowest_prob >= 0.5:
+        if lowest_prob >= 0.15:
             move = None
 
         if move != None:
@@ -276,10 +251,28 @@ class MinesweeperAI:
 
         probmore0dot5 = set()
         for cell in self.knowledge:
-            if self.knowledge[cell] > 0.5:
+            if self.knowledge[cell] > 0.15:
                 probmore0dot5.add(cell)
 
-        available_moves = available_moves - probmore0dot5
+        if available_moves != probmore0dot5:
+            available_moves = available_moves - probmore0dot5
+
+        if len(available_moves) < 3:
+            for i in range(self.height):
+                for j in range(self.width):
+                    if (i, j) in self.moves_made:
+                        print(".", end="")
+                    elif (i, j) in self.mines:
+                        print("*", end="")
+                    elif (i, j) in self.safe:
+                        print("s", end="")
+                    else:
+                        print(" ", end="")
+                print()
+
+        if len(available_moves) == 0:
+            return None
+
         random_move = random.randint(0, len(available_moves) - 1)
 
         return list(available_moves)[random_move]

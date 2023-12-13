@@ -7,6 +7,9 @@ class Knowledge:
         self.dependency = dependency
         self.bomb_count = bombs
 
+    def __repr__(self) -> str:
+        return f"{self.dependency} = {self.bomb_count}"
+
     def remove_bomb(self, bomb: tuple[int, int]):
         if bomb not in self.dependency:
             return
@@ -38,16 +41,6 @@ def factorial(n):
         total = total * i
 
     return total
-
-
-def nCr(n, r):
-    if r < 0 or r > n:
-        raise Exception("r < 0 or r > n")
-
-    num = factorial(n)
-    deno = factorial(n - r) * factorial(r)
-
-    return num / deno
 
 
 def bucket_combinations(
