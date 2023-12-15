@@ -1,9 +1,8 @@
 import random
 from copy import deepcopy
-from typing import List, Set, Tuple
+from typing import Dict, List, Set, Tuple
 
-from utils import (Knowledge, bucket_combinations, combine_buckets,
-                   new_bucket_coordinate)
+from utils import Knowledge, bucket_probability, create_buckets
 
 
 class Minesweeper:
@@ -109,42 +108,32 @@ class MinesweeperAI:
         self.mines: Set[Tuple[int, int]] = set()
 
         # probabilities of each coordinate
-        self.knowledge = dict()
+        self.knowledge: Dict[Tuple[int, int], float] = dict()
+        self.knowledge_base: List[Knowledge] = list()
 
-        # knowledge helper
-        # this is for finding clusters so that in individual cluster
-        # we can perform probability
-        self.bucket: List[List[Knowledge]] = list()
-        # List[Knowledge]
-        self.bucket_coordinate: List[Knowledge] = list()
-
-    def mark_safe_move(self, safe: tuple[int, int]):
-        i = None
-        for val in self.bucket_coordinate:
-            if safe in val.dependency:
-                i = val.bomb_count
-
-        if i != None:
-            for k in self.bucket[i]:
-                k.remove_safe(safe)
+    def mark_safe_move(self, safe: Tuple[int, int]):
+        for knowledge in self.knowledge_base:
+            knowledge.remove_safe(safe)
 
         self.safe.add(safe)
 
-    def mark_bomb_move(self, bomb: tuple[int, int]):
-        i = None
-        for val in self.bucket_coordinate:
-            if bomb in val.dependency:
-                i = val.bomb_count
-
-        if i != None:
-            for k in self.bucket[i]:
-                k.remove_bomb(bomb)
+    def mark_bomb_move(self, bomb: Tuple[int, int]):
+        for knowledge in self.knowledge_base:
+            knowledge.remove_bomb(bomb)
 
         self.mines.add(bomb)
 
+    def mark_move_made(self, move: Tuple[int, int]):
+        for knowledge in self.knowledge_base:
+            knowledge.remove_safe(move)
+
+        self.moves_made.add(move)
+        if move in self.knowledge:
+            del self.knowledge[move]
+
     def add_knowledge(self, cell, count):
         # update probabilities after making a move
-        self.moves_made.add(cell)
+        self.mark_move_made(cell)
 
         new_knowledge = set()
         all_cells_surrounding = set()
@@ -155,58 +144,37 @@ class MinesweeperAI:
                     all_cells_surrounding.add((i, j))
 
         new_knowledge = all_cells_surrounding - self.moves_made.union(self.mines)
-        new_knowledge = new_knowledge - set(cell)
         new_knowledge = new_knowledge - self.safe
         count = count - len(self.mines.intersection(all_cells_surrounding))
 
-        n = None
-        bcn = None
-        for k in new_knowledge:
-            for bci in range(len(self.bucket_coordinate)):
-                if k in self.bucket_coordinate[bci].dependency:
-                    n = self.bucket_coordinate[bci].bomb_count
-                    bcn = bci
+        self.knowledge_base.append(Knowledge(new_knowledge, count))
 
-        if n != None and bcn != None:
-            self.bucket[n].append(Knowledge(new_knowledge, count))
-            for nk in new_knowledge:
-                self.bucket_coordinate[bcn].add_nodes(nk)
-        else:
-            self.bucket.append([Knowledge(new_knowledge, count)])
-            self.bucket_coordinate.append(
-                (Knowledge(new_knowledge, len(self.bucket) - 1))
-            )
+        # remove set() = 0 from knowledge_base
+        new_knowledge_base = []
+        for k in self.knowledge_base:
+            if len(k.dependency) != 0:
+                new_knowledge_base.append(k)
+        self.knowledge_base = new_knowledge_base
 
-        # now see if there are common and combine buckets
-        self.bucket = combine_buckets(self.bucket)
-        self.bucket_coordinate = new_bucket_coordinate(self.bucket)
+        # get buckets
+        buckets = create_buckets(self.knowledge_base)
 
-        length_bucket = len(self.bucket)
-        for bt in range(length_bucket):
-            new_b = []
-            for k in self.bucket[bt]:
-                if len(k.dependency) != 0:
-                    new_b.append(k)
+        # then get probabilities and update the current knowledge
+        for bucket in buckets:
+            prob, total = bucket_probability(bucket)
 
-            self.bucket[bt] = new_b
+            if len(prob) == 0:
+                raise Exception("Empty model returned for bucket_probability")
 
-        # then apply probabilities to each bucket and get result
-        for bt in self.bucket:
-            d = set([m for k in bt for m in k.dependency])
-            model = dict()
-            count = dict()
-            total = {"total": 0}
+            # print("total", total)
+            for key in prob:
+                self.knowledge[key] = prob[key] / total
+                # print(key, "key")
+                # print(prob[key], "prob[key]")
+                # print(self.knowledge[key], "self.knowledge[key]")
 
-            for m in d:
-                model[m] = 0
-                count[m] = 0
-
-            bucket_combinations(bt, d, model, count, total)
-
-            for i in count:
-                self.knowledge[i] = count[i] / total["total"]
-
-        # then remove all the mines with prob = 1
+        # print(self.knowledge, "knowledge after finding probabilities")
+        # then remove all the mines with prob = 1 and prob = 0
         temp_knowledge = deepcopy(self.knowledge)
         for k in temp_knowledge:
             if temp_knowledge[k] == 1:
@@ -216,8 +184,9 @@ class MinesweeperAI:
                 self.mark_safe_move(k)
                 del self.knowledge[k]
 
-        print(self.knowledge)
-        print(self.mines)
+        print(self.knowledge, "probabilities")
+        # print(self.knowledge_base, "knowledge_base")
+        print(self.mines, "mines")
         return
 
     def make_safe_move(self):
@@ -239,8 +208,6 @@ class MinesweeperAI:
 
         if move != None:
             print("Made safe move", move)
-            self.moves_made.add(move)
-            del self.knowledge[move]
 
         return move
 
