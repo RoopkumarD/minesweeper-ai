@@ -1,3 +1,5 @@
+# Code by CS50AI Minesweeper
+
 import math
 import sys
 import time
